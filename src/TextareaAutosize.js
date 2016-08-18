@@ -7,18 +7,29 @@ import calculateNodeHeight from './calculateNodeHeight';
 
 const emptyFunction = function() {};
 
+const omit = (props, obj) => Object.keys(obj).reduce((acc, key) => {
+  if (props.indexOf(key) !== -1) {
+    return acc;
+  }
+
+  acc[key] = obj[key];
+  return acc;
+}, {});
+
+const purifyForRender = omit.bind(null, ['minRows', 'maxRows', 'onHeightChange', 'useCacheForDOMMeasurements']);
+
 export default class TextareaAutosize extends React.Component {
 
   static propTypes = {
     /**
      * Current textarea value.
      */
-    value: React.PropTypes.string,
+    value: React.PropTypes.string.isRequired,
 
     /**
      * Callback on value change.
      */
-    onChange: React.PropTypes.func,
+    onChange: React.PropTypes.func.isRequired,
 
     /**
      * Callback on height changes.
@@ -51,7 +62,6 @@ export default class TextareaAutosize extends React.Component {
   }
 
   static defaultProps = {
-    onChange: emptyFunction,
     onHeightChange: emptyFunction,
     useCacheForDOMMeasurements: false
   }
@@ -63,39 +73,29 @@ export default class TextareaAutosize extends React.Component {
       minHeight: -Infinity,
       maxHeight: Infinity
     };
-    this._onNextFrameActionId = null;
     this._rootDOMNode = null;
-    this._onChange = this._onChange.bind(this);
     this._resizeComponent = this._resizeComponent.bind(this);
     this._onRootDOMNode = this._onRootDOMNode.bind(this);
   }
 
   render() {
-    let {
-      valueLink,
-      minRows: _minRows,
-      maxRows: _maxRows,
-      onHeightChange: _onHeightChange,
-      useCacheForDOMMeasurements: _useCacheForDOMMeasurements,
-      ...props,
-    } = this.props;
-    if (typeof valueLink === 'object') {
-      props.value = valueLink.value;
-    }
-    props.style = {
-      ...props.style,
-      height: this.state.height || 0,
+    let {style} = this.props;
+    let {height = 0, maxHeight} = this.state;
+    style = {
+      ...style,
+      height,
     };
-    let maxHeight = Math.max(
-      props.style.maxHeight ? props.style.maxHeight : Infinity,
-      this.state.maxHeight);
-    if (maxHeight < this.state.height) {
-      props.style.overflow = 'hidden';
+    maxHeight = Math.max(
+      style.maxHeight ? style.maxHeight : Infinity,
+      maxHeight,
+    );
+    if (maxHeight < height) {
+      style.overflow = 'hidden';
     }
     return (
       <textarea
-        {...props}
-        onChange={this._onChange}
+        {...purifyForRender(this.props)}
+        style={style}
         ref={this._onRootDOMNode}
         />
     );
@@ -106,95 +106,76 @@ export default class TextareaAutosize extends React.Component {
     window.addEventListener('resize', this._resizeComponent);
   }
 
-  componentWillReceiveProps() {
-    // Re-render with the new content then recalculate the height as required.
-    this._clearNextFrame();
-    this._onNextFrameActionId = onNextFrame(this._resizeComponent);
+  componentWillReceiveProps(nextProps) {
+    if (nextProps.value !== this.props.value) {
+      this._resizeComponent(nextProps.value || nextProps.placeholder || '');
+    }
   }
 
   componentDidUpdate(prevProps, prevState) {
-    // Invoke callback when old height does not equal to new one.
     if (this.state.height !== prevState.height) {
       this.props.onHeightChange(this.state.height);
     }
   }
 
   componentWillUnmount() {
-    // Remove any scheduled events to prevent manipulating the node after it's
-    // been unmounted.
-    this._clearNextFrame();
     window.removeEventListener('resize', this._resizeComponent);
-  }
-
-  _clearNextFrame() {
-    if (this._onNextFrameActionId) {
-      clearNextFrameAction(this._onNextFrameActionId);
-    }
   }
 
   _onRootDOMNode(node) {
     this._rootDOMNode = node;
   }
 
-  _onChange(e) {
-    this._resizeComponent();
-    let {valueLink, onChange} = this.props;
-    if (valueLink) {
-      valueLink.requestChange(e.target.value);
-    } else {
-      onChange(e);
-    }
-  }
-
-  _resizeComponent() {
-    let {useCacheForDOMMeasurements} = this.props;
+  _resizeComponent(value = this.props.value || this.props.placeholder || '') {
+    let {rows, minRows, maxRows, useCacheForDOMMeasurements} = this.props;
     this.setState(calculateNodeHeight(
       this._rootDOMNode,
+      value,
       useCacheForDOMMeasurements,
-      this.props.rows || this.props.minRows,
-      this.props.maxRows));
+      rows || minRows,
+      maxRows));
   }
 
   /**
    * Read the current value of <textarea /> from DOM.
    */
   get value(): string {
-    return this._rootDOMNode.value;
+    return this._rootDOMNode && this._rootDOMNode.value;
   }
 
   /**
    * Set the current value of <textarea /> DOM node.
    */
   set value(val) {
-    this._rootDOMNode.value = val;
+    this._rootDOMNode && (this._rootDOMNode.value = val);
   }
 
   /**
    * Read the current selectionStart of <textarea /> from DOM.
    */
   get selectionStart(): number {
-    return this._rootDOMNode.selectionStart;
+    return this._rootDOMNode && this._rootDOMNode.selectionStart;
   }
 
   /**
    * Set the current selectionStart of <textarea /> DOM node.
    */
   set selectionStart(selectionStart: number) {
-    this._rootDOMNode.selectionStart = selectionStart;
+    this._rootDOMNode && (this._rootDOMNode.selectionStart = selectionStart);
   }
 
   /**
    * Read the current selectionEnd of <textarea /> from DOM.
    */
   get selectionEnd(): number {
-    return this._rootDOMNode.selectionEnd;
+    return this._rootDOMNode && this._rootDOMNode.selectionEnd;
   }
 
   /**
    * Set the current selectionEnd of <textarea /> DOM node.
    */
   set selectionEnd(selectionEnd: number) {
-    this._rootDOMNode.selectionEnd = selectionEnd;
+    this._rootDOMNode && (this._rootDOMNode.selectionEnd = selectionEnd);
   }
 
   /**
@@ -211,19 +192,4 @@ export default class TextareaAutosize extends React.Component {
     this._rootDOMNode.blur();
   }
 
-}
-
-function onNextFrame(cb) {
-  if (window.requestAnimationFrame) {
-    return window.requestAnimationFrame(cb);
-  }
-  return window.setTimeout(cb, 1);
-}
-
-function clearNextFrameAction(nextFrameId) {
-  if (window.cancelAnimationFrame) {
-    window.cancelAnimationFrame(nextFrameId);
-  } else {
-    window.clearTimeout(nextFrameId);
-  }
 }
